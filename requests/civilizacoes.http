@@ -1,0 +1,3 @@
+### GET - Lista todas as civilizações
+GET http://localhost:8080/civilizacoes
+Accept: application/json

@@ -2,8 +2,11 @@ package org.infnet;
 
 import com.google.gson.Gson;
 import io.javalin.Javalin;
+import org.infnet.config.GsonMapper;
+import org.infnet.dto.ErrorResponse;
+import org.infnet.exception.CivilizacaoInvalidaException;
 import org.infnet.modelo.Civilizacao;
-import org.infnet.repository.CivilizacaoRepository;
+import org.infnet.repository.CivilizacaoRepositoryInMemory;
 import org.infnet.service.CivilizacaoService;
 
 import java.util.HashMap;
@@ -18,16 +21,39 @@ public class App {
     public static void main( String[] args ) {
         Gson gson = new Gson();
         CivilizacaoService civilizacaoService =
-                new CivilizacaoService(new CivilizacaoRepository());
-        Javalin app = Javalin.create().start(8081);
+                new CivilizacaoService(new CivilizacaoRepositoryInMemory());
+        Javalin app = Javalin.create(cfg ->{
+            cfg.jsonMapper(new GsonMapper());
+        }).start(8081);
         //GET /civilizacao
+
+        app.exception(CivilizacaoInvalidaException.class, (e,ctx) -> {
+            String message = e.getMessage();
+            ctx.status(400).json(new ErrorResponse(message,"Erro Ao criar civilizacao"));
+
+        });
+        app.exception(NumberFormatException.class, (e, ctx) -> {
+            ctx.status(400).json(new ErrorResponse("Requisicao Invalida","Erro Ao criar civilizacao"));
+        });
+
         app.get("/civilizacao", ctx ->{
-            String s = ctx.queryParam("nome");
-            System.out.println("Query Param:  " + s);
-            List<Civilizacao> civilizacoes = civilizacaoService.buscarTodas();
+            String termo = ctx.queryParam("nome");
+            List<Civilizacao> resultado = (termo == null || termo.isBlank())
+                    ? civilizacaoService.buscarTodas()
+                    : civilizacaoService.buscarPorLocalizacao(termo);
+
             ctx.header("Content-Type","application/json");
-            String result = gson.toJson(civilizacoes);
-            ctx.result(result);
+            String result = gson.toJson(resultado);
+            ctx.json(result);
+            //Jackson
+            //ctx.result(result);
+        });
+        app.before("/civilizacao/protegidas", ctx ->{
+           ctx.status(401).result(new ErrorResponse("Não Autoirzado", "Error!").toString());
+        });
+        app.get("/civilizacao/protegidas", ctx ->{
+            System.out.println("Rodei");
+            ctx.json(Map.of("message", "Nao era para estar vendo isso!"));
         });
 
         //GET /civilizacao/id
@@ -41,18 +67,40 @@ public class App {
                 String result = gson.toJson(civilizacao);
                 ctx.result(result);
             }
-
         });
-
         //POST /civilizacao -> Criar uma nova
         app.post("/civilizacao", ctx ->{
-            String body = ctx.body();
-            Civilizacao civilizacao = gson.fromJson(body, Civilizacao.class);
-            civilizacaoService.criar(civilizacao);
-            ctx.status(201).result(created());
+               String body = ctx.body();
+               Civilizacao civilizacao = gson.fromJson(body, Civilizacao.class);
+               civilizacaoService.criar(civilizacao);
+               ctx.status(201).result(sucesso("Civilizacao Cadastrada com Sucesso!"));
         });
+        //DELETE /civilizacao/{id} -> civilizacao/1 civilizacao/dasda
+        app.delete("/civilizacao/{id}", ctx ->{
+                int id = Integer.parseInt(ctx.pathParam("id"));
+                boolean ok = civilizacaoService.remover(id);
+                ctx.header("Content-Type","application/json");
 
+                if(ok){
+                    ctx.status(200).result(sucesso("Civilizacao Removida com Sucesso!"));
+                }
+        });
+        //PUT  civilizacao/{id}
+        app.put("/civilizacao/{id}", ctx-> {
 
+              int id = Integer.parseInt(ctx.pathParam("id"));
+              String body = ctx.body();
+              Civilizacao nova = gson.fromJson(body, Civilizacao.class);
+              boolean ok = civilizacaoService.atualizar(id, nova);
+              ctx.header("Content-Type","application/json");
+
+              if(ok){
+                  ctx.status(200).result(sucesso("Civilização atualizada com sucesso!"));
+              }else {
+                  ctx.status(404).result(notFound());
+              }
+
+        });
     }
     private static String notFound(){
         Map<String, String> map = new HashMap<>();
@@ -60,9 +108,15 @@ public class App {
         Gson gson = new Gson();
         return gson.toJson(map);
     }
-    private static String created(){
+    private static String error(String message){
         Map<String, String> map = new HashMap<>();
-        map.put("message", "Civilizacao Cadastrada com Sucesso!");
+        map.put("message", message);
+        Gson gson = new Gson();
+        return gson.toJson(map);
+    }
+    private static String sucesso(String message){
+        Map<String, String> map = new HashMap<>();
+        map.put("message", message);
         Gson gson = new Gson();
         return gson.toJson(map);
     }
