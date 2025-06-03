@@ -1,14 +1,22 @@
 package org.infnet;
 
+import com.github.javafaker.Faker;
 import com.google.gson.Gson;
 import io.javalin.Javalin;
 import org.infnet.config.GsonMapper;
 import org.infnet.dto.ErrorResponse;
+import org.infnet.dto.UsuarioDTO;
+import org.infnet.dto.UsuarioRecord;
+import org.infnet.exception.AcessoInvalidoException;
 import org.infnet.exception.CivilizacaoInvalidaException;
 import org.infnet.modelo.Civilizacao;
+import org.infnet.modelo.Usuario;
 import org.infnet.repository.CivilizacaoRepositoryInMemory;
+import org.infnet.repository.UsuarioRepositoryMemoria;
 import org.infnet.service.CivilizacaoService;
+import org.infnet.service.UsuarioService;
 
+import java.security.MessageDigest;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,20 +30,31 @@ public class App {
         Gson gson = new Gson();
         CivilizacaoService civilizacaoService =
                 new CivilizacaoService(new CivilizacaoRepositoryInMemory());
+
+        UsuarioService usuarioService = new UsuarioService(new UsuarioRepositoryMemoria());
+
         Javalin app = Javalin.create(cfg ->{
             cfg.jsonMapper(new GsonMapper());
         }).start(8081);
         //GET /civilizacao
 
-        app.exception(CivilizacaoInvalidaException.class, (e,ctx) -> {
-            String message = e.getMessage();
-            ctx.status(400).json(new ErrorResponse(message,"Erro Ao criar civilizacao"));
+        app.post("/usuario/login", ctx-> {
+            Usuario usario = gson.fromJson(ctx.body(), Usuario.class);
+            System.out.println(usario.toString());
+            Usuario logado = usuarioService.logar(usario);
+            String tokenJWT = usuarioService.getTokenJWT(logado);
+            //ctx.status(200).json(logado.getUsuarioRecord());
+
+
+
+
+            ctx.status(200).json(Map.of("token", tokenJWT));
 
         });
-        app.exception(NumberFormatException.class, (e, ctx) -> {
-            ctx.status(400).json(new ErrorResponse("Requisicao Invalida","Erro Ao criar civilizacao"));
+        app.get("/usuario",ctx -> {
+            List<UsuarioRecord> lista = usuarioService.getAll();
+            ctx.status(200).json(lista);
         });
-
         app.get("/civilizacao", ctx ->{
             String termo = ctx.queryParam("nome");
             List<Civilizacao> resultado = (termo == null || termo.isBlank())
@@ -49,7 +68,14 @@ public class App {
             //ctx.result(result);
         });
         app.before("/civilizacao/protegidas", ctx ->{
-           ctx.status(401).result(new ErrorResponse("Não Autoirzado", "Error!").toString());
+          // ctx.status(401).result(new ErrorResponse("Não Autorizado", "Error!").toString());
+            String authorization = ctx.header("Authorization");
+            boolean valido = usuarioService.validarToken(authorization);
+            if(authorization == null || !valido) {
+                throw new AcessoInvalidoException("Usuario nao autenticado");
+            }else if (valido) {
+                System.out.println("Loguei");
+            }
         });
         app.get("/civilizacao/protegidas", ctx ->{
             System.out.println("Rodei");
@@ -100,6 +126,19 @@ public class App {
                   ctx.status(404).result(notFound());
               }
 
+        });
+        app.exception(AcessoInvalidoException.class, (e,ctx) -> {
+            String message = e.getMessage();
+            ctx.status(401).json(new ErrorResponse(message,e.getMessage()));
+
+        });
+        app.exception(CivilizacaoInvalidaException.class, (e,ctx) -> {
+            String message = e.getMessage();
+            ctx.status(400).json(new ErrorResponse(message,"Erro Ao criar civilizacao"));
+
+        });
+        app.exception(NumberFormatException.class, (e, ctx) -> {
+            ctx.status(400).json(new ErrorResponse("Requisicao Invalida","Erro Ao criar civilizacao"));
         });
     }
     private static String notFound(){
