@@ -45,9 +45,6 @@ public class App {
             String tokenJWT = usuarioService.getTokenJWT(logado);
             //ctx.status(200).json(logado.getUsuarioRecord());
 
-
-
-
             ctx.status(200).json(Map.of("token", tokenJWT));
 
         });
